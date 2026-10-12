@@ -1,0 +1,39 @@
+{
+  "best_model": "RandomForest",
+  "classes": [
+    "Banana",
+    "Coconut",
+    "Cotton",
+    "Groundnut",
+    "Maize",
+    "Pulses",
+    "Rice",
+    "Sorghum",
+    "Sugarcane",
+    "Turmeric"
+  ],
+  "features": [
+    "ph",
+    "soc",
+    "clay",
+    "sand",
+    "elevation",
+    "slope",
+    "aspect",
+    "ndvi",
+    "suit01"
+  ],
+  "metrics": {
+    "RandomForest": {
+      "accuracy": 0.8798,
+      "macro_f1": 0.7553,
+      "top3_accuracy": 0.9955
+    },
+    "XGBoost": {
+      "accuracy": 0.9199,
+      "macro_f1": 0.7687,
+      "top3_accuracy": 0.9955
+    }
+  },
+  "total_samples": 3207
+}
