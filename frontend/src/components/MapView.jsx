@@ -23,10 +23,17 @@ export const SUITABILITY_COLORS = {
   'Not recommended': '#64748b'
 }
 
+export const YIELD_INDEX_COLORS = {
+  'High (>1.05x)': '#10b981',
+  'Optimal (0.98-1.05x)': '#06b6d4',
+  'Moderate (0.90-0.98x)': '#f59e0b',
+  'Below Avg (<0.90x)': '#f43f5e',
+}
+
 export default function MapView({ plots, onSelectPlotForPredict }) {
   const [selectedCrop, setSelectedCrop] = useState('ALL')
   const [selectedSuitability, setSelectedSuitability] = useState('ALL')
-  const [colorMode, setColorMode] = useState('crop') // 'crop' | 'suitability'
+  const [colorMode, setColorMode] = useState('crop') // 'crop' | 'suitability' | 'yield'
   const [activePlot, setActivePlot] = useState(null)
   const [searchCoords, setSearchCoords] = useState('')
 
@@ -51,10 +58,18 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
   const getMarkerColor = (plot) => {
     if (colorMode === 'crop') {
       return CROP_COLORS[plot.recommended_crop] || '#94a3b8'
-    } else {
+    } else if (colorMode === 'suitability') {
       return SUITABILITY_COLORS[plot.suitability_class] || '#64748b'
+    } else {
+      const idx = parseFloat(plot.pred_yield_index)
+      if (!idx) return '#64748b'
+      if (idx >= 1.05) return '#10b981'
+      if (idx >= 0.98) return '#06b6d4'
+      if (idx >= 0.90) return '#f59e0b'
+      return '#f43f5e'
     }
   }
+
 
   return (
     <div className="glass-panel map-view-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -112,6 +127,14 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
               onClick={() => setColorMode('suitability')}
             >
               By Suitability
+            </button>
+            <button
+              id="btn-color-by-yield"
+              className={`btn ${colorMode === 'yield' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '5px 12px', fontSize: '0.8rem' }}
+              onClick={() => setColorMode('yield')}
+            >
+              By Yield Index
             </button>
           </div>
         </div>
@@ -196,7 +219,11 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
             fontSize: '0.75rem'
           }}>
             <div style={{ fontWeight: '600', marginBottom: '6px', color: '#ffffff' }}>
-              {colorMode === 'crop' ? 'Top Crops Legend' : 'Suitability Class'}
+              {colorMode === 'crop'
+                ? 'Top Crops Legend'
+                : colorMode === 'suitability'
+                ? 'Suitability Class'
+                : 'Yield Index Legend (LSTM)'}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
               {colorMode === 'crop'
@@ -206,10 +233,17 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
                       <span style={{ color: 'var(--text-muted)' }}>{crop}</span>
                     </div>
                   ))
-                : Object.entries(SUITABILITY_COLORS).map(([suit, color]) => (
+                : colorMode === 'suitability'
+                ? Object.entries(SUITABILITY_COLORS).map(([suit, color]) => (
                     <div key={suit} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color }}></span>
                       <span style={{ color: 'var(--text-muted)' }}>{suit}</span>
+                    </div>
+                  ))
+                : Object.entries(YIELD_INDEX_COLORS).map(([label, color]) => (
+                    <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color }}></span>
+                      <span style={{ color: 'var(--text-muted)' }}>{label}</span>
                     </div>
                   ))
               }
@@ -246,6 +280,27 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
                 </div>
               )}
             </div>
+
+            {/* Module 4: Crop Yield Forecast */}
+            {activePlot.pred_yield_kg_ha != null && activePlot.pred_yield_kg_ha !== '' && (
+              <div style={{ padding: '12px', background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.1) 0%, rgba(14, 165, 233, 0.18) 100%)', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase', color: '#38bdf8' }}>
+                    📈 Yield Forecast (LSTM)
+                  </span>
+                  <span style={{ fontSize: '0.75rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.25)', color: '#38bdf8', fontWeight: '600' }}>
+                    {activePlot.pred_yield_index ? `${activePlot.pred_yield_index}x index` : 'Forecasted'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '1.3rem', fontWeight: '700', color: '#ffffff', marginTop: '4px' }}>
+                  {Number(activePlot.pred_yield_kg_ha).toLocaleString()} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{activePlot.recommended_crop === 'Coconut' ? 'nuts/ha' : 'kg/ha'}</span>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '2px' }}>
+                  Fused 12-month Sentinel-2 NDVI/EVI temporal series
+                </div>
+              </div>
+            )}
+
 
             {/* Suitability Meter */}
             <div>

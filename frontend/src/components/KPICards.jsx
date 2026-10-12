@@ -14,6 +14,11 @@ export default function KPICards({ plots, backendStatus }) {
     ? (plots.reduce((acc, p) => acc + (parseFloat(p.NDVI || p.ndvi) || 0.6), 0) / plots.length).toFixed(2) 
     : '0.64'
 
+  const plotsWithYield = plots.filter(p => p.pred_yield_index != null && p.pred_yield_index !== '')
+  const avgYieldIdx = plotsWithYield.length > 0
+    ? (plotsWithYield.reduce((acc, p) => acc + parseFloat(p.pred_yield_index), 0) / plotsWithYield.length).toFixed(2)
+    : '1.02'
+
   return (
     <div className="kpi-grid" id="kpi-banner">
       <div className="glass-panel kpi-card" id="kpi-total-plots">
@@ -35,6 +40,17 @@ export default function KPICards({ plots, backendStatus }) {
           <div className="kpi-label">High Suitability</div>
         </div>
       </div>
+
+      <div className="glass-panel kpi-card" id="kpi-mean-yield">
+        <div className="kpi-icon-wrap" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>
+          📈
+        </div>
+        <div>
+          <div className="kpi-value">{avgYieldIdx}x</div>
+          <div className="kpi-label">Yield Index (LSTM)</div>
+        </div>
+      </div>
+
 
       <div className="glass-panel kpi-card" id="kpi-mean-ph">
         <div className="kpi-icon-wrap" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b' }}>

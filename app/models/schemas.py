@@ -31,6 +31,23 @@ class CropRecommendation(BaseModel):
     agronomic_fit: Optional[float] = None
 
 
+class MonthlyPhenologyItem(BaseModel):
+    month: int
+    month_name: str
+    ndvi: float
+    evi: float
+
+
+class YieldPredictionResult(BaseModel):
+    crop: str
+    pred_yield_index: float
+    pred_yield_kg_ha: float
+    baseline_mean_kg_ha: float
+    variance_pct: float
+    yield_category: str
+    monthly_phenology: Optional[List[MonthlyPhenologyItem]] = None
+
+
 class RecommendationResult(BaseModel):
     """Comprehensive recommendation output for a plot."""
     recommended: bool
@@ -40,6 +57,12 @@ class RecommendationResult(BaseModel):
     suitability_class: str
     agro_fit_top: float
     top_recommendations: List[CropRecommendation]
+    yield_prediction: Optional[YieldPredictionResult] = None
+
+
+class YieldPredictInput(PlotInput):
+    crop: Optional[str] = Field(default=None, description="Crop name to forecast yield for (if None, determined automatically)")
+
 
 
 class BatchRecommendationRequest(BaseModel):

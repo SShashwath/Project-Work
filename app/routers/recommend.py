@@ -9,6 +9,7 @@ from app.models.schemas import (
 )
 from app.services.agronomy import calculate_plot_fit
 from app.services.ml_recommender import predict_single_plot
+from app.services.yield_service import predict_plot_yield
 from app.config import CROPS, TARGET_SHARE
 
 router = APIRouter(prefix="/recommend", tags=["Crop Recommendation"])
@@ -39,9 +40,29 @@ async def recommend_for_plot(plot: PlotInput):
             lat=plot.lat,
             lon=plot.lon,
         )
+
+        # Module 4: Attach yield forecast for recommended crop
+        if result.recommended and result.recommended_crop != "Not recommended":
+            try:
+                ypred = predict_plot_yield(
+                    crop=result.recommended_crop,
+                    elevation=plot.elevation,
+                    slope=plot.slope,
+                    phh2o=plot.phh2o,
+                    soc=plot.soc,
+                    clay=plot.clay,
+                    sand=plot.sand,
+                    suitability_score=result.suitability_score,
+                    ndvi=plot.ndvi,
+                )
+                result.yield_prediction = ypred
+            except Exception as ye:
+                print(f"⚠️ Yield prediction attachment warning: {ye}")
+
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Recommendation failed: {e}")
+
 
 
 @router.post(
