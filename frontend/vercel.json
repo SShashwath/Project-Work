@@ -2,19 +2,19 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://agrisense-backend.onrender.com/:path*"
+      "destination": "https://project-work-oi94.onrender.com/:path*"
     },
     {
       "source": "/docs",
-      "destination": "https://agrisense-backend.onrender.com/docs"
+      "destination": "https://project-work-oi94.onrender.com/docs"
     },
     {
       "source": "/redoc",
-      "destination": "https://agrisense-backend.onrender.com/redoc"
+      "destination": "https://project-work-oi94.onrender.com/redoc"
     },
     {
       "source": "/openapi.json",
-      "destination": "https://agrisense-backend.onrender.com/openapi.json"
+      "destination": "https://project-work-oi94.onrender.com/openapi.json"
     },
     {
       "source": "/(.*)",
