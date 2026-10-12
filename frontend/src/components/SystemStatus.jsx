@@ -37,14 +37,14 @@ export default function SystemStatus({ backendStatus }) {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
               <span style={{ color: 'var(--text-muted)' }}>Swagger UI:</span>
-              <a href="http://localhost:8001/docs" target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none' }}>
-                http://localhost:8001/docs ↗
+              <a href="/docs" target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none' }}>
+                /docs ↗
               </a>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
               <span style={{ color: 'var(--text-muted)' }}>ReDoc Specification:</span>
-              <a href="http://localhost:8001/redoc" target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none' }}>
-                http://localhost:8001/redoc ↗
+              <a href="/redoc" target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none' }}>
+                /redoc ↗
               </a>
             </div>
           </div>
