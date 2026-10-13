@@ -1,15 +1,33 @@
-import React, { useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
+  PieChart, Pie, Cell, Legend,
+  ScatterChart, Scatter, CartesianGrid
 } from 'recharts'
 import { CROP_COLORS, SUITABILITY_COLORS } from './MapView'
 
 export default function AnalyticsView({ plots }) {
+  const [elevationZone, setElevationZone] = useState('ALL') // 'ALL' | 'plains' | 'midlands' | 'ghats'
+
+  // Filter plots by active elevation zone
+  const filteredPlots = useMemo(() => {
+    if (elevationZone === 'plains') {
+      return plots.filter(p => (parseFloat(p.elevation) || 0) < 350)
+    } else if (elevationZone === 'midlands') {
+      return plots.filter(p => {
+        const e = parseFloat(p.elevation) || 0
+        return e >= 350 && e <= 600
+      })
+    } else if (elevationZone === 'ghats') {
+      return plots.filter(p => (parseFloat(p.elevation) || 0) > 600)
+    }
+    return plots
+  }, [plots, elevationZone])
+
   // Crop distribution data for Recharts
   const cropData = useMemo(() => {
     const counts = {}
-    plots.forEach(p => {
+    filteredPlots.forEach(p => {
       const c = p.recommended_crop || 'Unknown'
       counts[c] = (counts[c] || 0) + 1
     })
@@ -21,12 +39,12 @@ export default function AnalyticsView({ plots }) {
         fill: CROP_COLORS[name] || '#818cf8'
       }))
       .sort((a, b) => b.count - a.count)
-  }, [plots])
+  }, [filteredPlots])
 
   // Suitability Class distribution data for Recharts
   const suitabilityData = useMemo(() => {
     const counts = { High: 0, Moderate: 0, Low: 0 }
-    plots.forEach(p => {
+    filteredPlots.forEach(p => {
       const s = p.suitability_class
       if (counts[s] !== undefined) counts[s]++
     })
@@ -36,12 +54,12 @@ export default function AnalyticsView({ plots }) {
       { name: 'Moderate', value: counts.Moderate, color: SUITABILITY_COLORS.Moderate },
       { name: 'Low', value: counts.Low, color: SUITABILITY_COLORS.Low }
     ]
-  }, [plots])
+  }, [filteredPlots])
 
   // Elevation distribution bins
   const elevationData = useMemo(() => {
     const bins = { '<300m': 0, '300-500m': 0, '500-800m': 0, '800-1200m': 0, '>1200m': 0 }
-    plots.forEach(p => {
+    filteredPlots.forEach(p => {
       const elev = parseFloat(p.elevation) || 0
       if (elev < 300) bins['<300m']++
       else if (elev < 500) bins['300-500m']++
@@ -51,12 +69,12 @@ export default function AnalyticsView({ plots }) {
     })
 
     return Object.entries(bins).map(([range, count]) => ({ range, count }))
-  }, [plots])
+  }, [filteredPlots])
 
-  // Module 4 Yield analysis per crop
+  // Yield analysis per crop
   const yieldData = useMemo(() => {
     const stats = {}
-    plots.forEach(p => {
+    filteredPlots.forEach(p => {
       const c = p.recommended_crop
       if (!c || c === 'Not recommended' || p.pred_yield_index == null || p.pred_yield_index === '') return
       if (!stats[c]) stats[c] = { crop: c, totalIdx: 0, totalKg: 0, count: 0 }
@@ -80,15 +98,98 @@ export default function AnalyticsView({ plots }) {
         fill: CROP_COLORS[s.crop] || '#38bdf8'
       }))
       .sort((a, b) => b.avgYieldIdx - a.avgYieldIdx)
-  }, [plots])
+  }, [filteredPlots])
 
-  const steepSlopeCount = plots.filter(p => parseFloat(p.slope) > 15).length
-  const steepSlopePct = plots.length > 0 ? ((steepSlopeCount / plots.length) * 100).toFixed(1) : '18.4'
-  const cultivablePlots = plots.filter(p => p.recommended_crop !== 'Not recommended').length
+  // Sampled scatter data: NDVI vs. Predicted Yield Index
+  const scatterData = useMemo(() => {
+    const valid = filteredPlots.filter(p => {
+      const ndvi = parseFloat(p.NDVI || p.ndvi)
+      const yIdx = parseFloat(p.pred_yield_index)
+      return !isNaN(ndvi) && !isNaN(yIdx) && p.recommended_crop && p.recommended_crop !== 'Not recommended'
+    })
 
+    // Take balanced sample of up to 150 points for chart clarity
+    const step = Math.max(1, Math.floor(valid.length / 150))
+    return valid.filter((_, idx) => idx % step === 0).map(p => ({
+      ndvi: +(parseFloat(p.NDVI || p.ndvi)).toFixed(3),
+      yieldIndex: +(parseFloat(p.pred_yield_index)).toFixed(3),
+      crop: p.recommended_crop,
+      elevation: Math.round(parseFloat(p.elevation) || 0)
+    }))
+  }, [filteredPlots])
+
+  // Export filtered dataset to CSV
+  const exportCsv = () => {
+    if (!filteredPlots || filteredPlots.length === 0) return
+
+    const headers = ['lat', 'lon', 'elevation', 'slope', 'ndvi', 'phh2o', 'soc', 'clay', 'sand', 'recommended_crop', 'suitability_class', 'pred_yield_index', 'pred_yield_kg_ha']
+    const rows = filteredPlots.map(p => headers.map(h => {
+      const val = p[h] !== undefined ? p[h] : (h === 'ndvi' ? p.NDVI : '')
+      return `"${val}"`
+    }).join(','))
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n')
+    const encodedUri = encodeURI(csvContent)
+    const link = document.createElement('a')
+    link.setAttribute('href', encodedUri)
+    link.setAttribute('download', `agrisense_coimbatore_${elevationZone.toLowerCase()}_parcels.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const steepSlopeCount = filteredPlots.filter(p => parseFloat(p.slope) > 15).length
+  const steepSlopePct = filteredPlots.length > 0 ? ((steepSlopeCount / filteredPlots.length) * 100).toFixed(1) : '0'
+  const cultivablePlots = filteredPlots.filter(p => p.recommended_crop !== 'Not recommended').length
 
   return (
     <div className="analytics-view-container" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      
+      {/* Top Filter Bar with Elevation Zones and CSV Export */}
+      <div className="glass-panel" style={{ padding: '14px 20px', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+            🏔️ Altitude Zone Filter:
+          </span>
+          <button
+            className={`btn ${elevationZone === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '4px 12px', fontSize: '0.75rem' }}
+            onClick={() => setElevationZone('ALL')}
+          >
+            All Zones ({plots.length})
+          </button>
+          <button
+            className={`btn ${elevationZone === 'plains' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '4px 12px', fontSize: '0.75rem' }}
+            onClick={() => setElevationZone('plains')}
+          >
+            🌾 Plains (&lt;350m)
+          </button>
+          <button
+            className={`btn ${elevationZone === 'midlands' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '4px 12px', fontSize: '0.75rem' }}
+            onClick={() => setElevationZone('midlands')}
+          >
+            🌱 Midlands & Foothills (350–600m)
+          </button>
+          <button
+            className={`btn ${elevationZone === 'ghats' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '4px 12px', fontSize: '0.75rem' }}
+            onClick={() => setElevationZone('ghats')}
+          >
+            ⛰️ Western Ghats (&gt;600m)
+          </button>
+        </div>
+
+        <button
+          className="btn btn-secondary"
+          style={{ padding: '6px 14px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+          onClick={exportCsv}
+        >
+          📥 Export Filtered CSV ({filteredPlots.length})
+        </button>
+      </div>
+
       {/* Top Insights Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
         <div className="glass-panel" style={{ padding: '20px' }}>
@@ -96,7 +197,7 @@ export default function AnalyticsView({ plots }) {
             🌾 Cultivable Parcels
           </div>
           <div style={{ fontSize: '1.8rem', fontFamily: 'var(--font-heading)', fontWeight: '700', color: '#10b981', margin: '4px 0' }}>
-            {cultivablePlots.toLocaleString()} <span style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>({((cultivablePlots / (plots.length || 1)) * 100).toFixed(1)}%)</span>
+            {cultivablePlots.toLocaleString()} <span style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>({((cultivablePlots / (filteredPlots.length || 1)) * 100).toFixed(1)}%)</span>
           </div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
             Satisfy FAO soil & slope agronomic bounds
@@ -123,7 +224,7 @@ export default function AnalyticsView({ plots }) {
             {cropData.find(c => c.name !== 'Not recommended')?.name || 'Turmeric'}
           </div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-            Highest quota match in Coimbatore agro-climatic zone
+            Highest quota match in active zone
           </div>
         </div>
       </div>
@@ -134,10 +235,10 @@ export default function AnalyticsView({ plots }) {
         <div className="glass-panel" style={{ padding: '24px' }}>
           <div style={{ marginBottom: '16px' }}>
             <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.15rem', color: '#ffffff' }}>
-              📊 Crop Recommendation Distribution (3,725 Plots)
+              📊 Crop Recommendation Distribution ({filteredPlots.length.toLocaleString()} Plots)
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Number of land parcels allocated to each crop category
+              Number of land parcels allocated to each crop category in active filter
             </p>
           </div>
 
@@ -215,6 +316,71 @@ export default function AnalyticsView({ plots }) {
         </div>
       </div>
 
+      {/* Module 4 Correlation: Scatter Plot (Canopy NDVI vs Yield Index) */}
+      <div className="glass-panel" style={{ padding: '24px' }}>
+        <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.15rem', color: '#38bdf8' }}>
+              🔬 Agronomic Correlation: Sentinel-2 Canopy NDVI vs. LSTM Yield Index
+            </h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              Parcel-level distribution demonstrating how vegetation vigor correlates with forecasted crop yield performance
+            </p>
+          </div>
+          <span style={{ fontSize: '0.75rem', padding: '4px 10px', borderRadius: '6px', background: 'rgba(56,189,248,0.15)', color: '#38bdf8', fontWeight: '600' }}>
+            Sampled Parcels
+          </span>
+        </div>
+
+        <div style={{ width: '100%', height: '300px' }}>
+          <ResponsiveContainer>
+            <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+              <XAxis
+                type="number"
+                dataKey="ndvi"
+                name="Canopy NDVI"
+                domain={[0.2, 0.9]}
+                stroke="#64748b"
+                fontSize={12}
+                unit=""
+                label={{ value: 'Sentinel-2 Canopy NDVI', position: 'insideBottom', offset: -10, fill: '#94a3b8', fontSize: 12 }}
+              />
+              <YAxis
+                type="number"
+                dataKey="yieldIndex"
+                name="Yield Index"
+                domain={[0.8, 1.25]}
+                stroke="#64748b"
+                fontSize={12}
+                unit="x"
+                label={{ value: 'Yield Index (x Baseline)', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 12 }}
+              />
+              <Tooltip
+                cursor={{ strokeDasharray: '3 3' }}
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const data = payload[0].payload
+                    return (
+                      <div style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.15)', padding: '10px', borderRadius: '8px', fontSize: '0.8rem' }}>
+                        <div style={{ fontWeight: '700', color: CROP_COLORS[data.crop] || '#38bdf8', marginBottom: '4px' }}>
+                          {data.crop}
+                        </div>
+                        <div>NDVI: <strong>{data.ndvi}</strong></div>
+                        <div>Yield Index: <strong>{data.yieldIndex}x</strong></div>
+                        <div>Elevation: <strong>{data.elevation}m</strong></div>
+                      </div>
+                    )
+                  }
+                  return null
+                }}
+              />
+              <Scatter name="Parcels" data={scatterData} fill="#38bdf8" />
+            </ScatterChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
       {/* Elevation Profile Row */}
       <div className="glass-panel" style={{ padding: '24px' }}>
         <div style={{ marginBottom: '16px' }}>
@@ -254,7 +420,7 @@ export default function AnalyticsView({ plots }) {
                 📈 Module 4: Crop Yield Performance & Regional Benchmarks (LSTM)
               </h3>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                Average predicted yield index and expected production across Coimbatore parcels (relative to 1.00 baseline)
+                Average predicted yield index and expected production across active parcels (relative to 1.00 baseline)
               </p>
             </div>
             <span style={{ fontSize: '0.75rem', padding: '4px 10px', borderRadius: '6px', background: 'rgba(56,189,248,0.15)', color: '#38bdf8', fontWeight: '600' }}>
@@ -325,4 +491,3 @@ export default function AnalyticsView({ plots }) {
     </div>
   )
 }
-

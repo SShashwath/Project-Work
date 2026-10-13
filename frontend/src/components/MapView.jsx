@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react'
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet'
+import React, { useState, useMemo, useEffect } from 'react'
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents } from 'react-leaflet'
 
 // Curated crop colors
 export const CROP_COLORS = {
@@ -30,12 +30,68 @@ export const YIELD_INDEX_COLORS = {
   'Below Avg (<0.90x)': '#f43f5e',
 }
 
+const TALUK_PRESETS = [
+  { name: 'All District', center: [10.99, 76.96], zoom: 10, tag: 'District Overview' },
+  { name: 'Pollachi', center: [10.6586, 77.0084], zoom: 12, tag: 'Coconut / Spices Heartland' },
+  { name: 'Mettupalayam', center: [11.3000, 76.9400], zoom: 12, tag: 'Bhavani River & Banana' },
+  { name: 'Sulur', center: [11.0300, 77.1250], zoom: 12, tag: 'Maize & Rainfed Plains' },
+  { name: 'Anamalai', center: [10.5800, 76.9300], zoom: 12, tag: 'Foothills / Turmeric' },
+  { name: 'Valparai', center: [10.3200, 76.9500], zoom: 11, tag: 'Western Ghats (High Elevation)' },
+  { name: 'Annur', center: [11.2330, 77.1330], zoom: 12, tag: 'Northern Agro-belt' }
+]
+
+const BASE_MAPS = {
+  dark: {
+    name: 'Dark Canvas',
+    url: 'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
+  },
+  satellite: {
+    name: 'Satellite View',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri, Maxar, Earthstar Geographics'
+  },
+  topo: {
+    name: 'World Topo',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri, HERE, Garmin, USGS, EPA'
+  }
+}
+
+// Controller component for map camera moves and click sampling
+function MapEventsController({ targetView, onMapClick }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (targetView) {
+      map.flyTo(targetView.center, targetView.zoom, { duration: 1.2 })
+    }
+  }, [targetView, map])
+
+  useMapEvents({
+    click(e) {
+      if (e.originalEvent && (e.originalEvent.target?.closest('.leaflet-popup') || e.originalEvent.target?.closest('.leaflet-marker-icon'))) {
+        return
+      }
+      if (onMapClick) {
+        onMapClick(e.latlng)
+      }
+    }
+  })
+
+  return null
+}
+
 export default function MapView({ plots, onSelectPlotForPredict }) {
   const [selectedCrop, setSelectedCrop] = useState('ALL')
   const [selectedSuitability, setSelectedSuitability] = useState('ALL')
   const [colorMode, setColorMode] = useState('crop') // 'crop' | 'suitability' | 'yield'
+  const [baseMapKey, setBaseMapKey] = useState('dark')
+  const [markerRadius, setMarkerRadius] = useState(4)
   const [activePlot, setActivePlot] = useState(null)
-  const [searchCoords, setSearchCoords] = useState('')
+  const [targetView, setTargetView] = useState(null)
+  const [activeTaluk, setActiveTaluk] = useState('All District')
+  const [sampledPoint, setSampledPoint] = useState(null)
 
   // Unique crops in dataset
   const cropList = useMemo(() => {
@@ -70,19 +126,99 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
     }
   }
 
+  // Handle clicking anywhere on map: drop sampled point and find closest plot
+  const handleMapClick = (latlng) => {
+    if (!plots || plots.length === 0) return
+
+    let nearest = null
+    let minDistanceSq = Infinity
+
+    for (const plot of plots) {
+      const lat = parseFloat(plot.lat)
+      const lon = parseFloat(plot.lon)
+      if (isNaN(lat) || isNaN(lon)) continue
+      const d = Math.pow(lat - latlng.lat, 2) + Math.pow(lon - latlng.lng, 2)
+      if (d < minDistanceSq) {
+        minDistanceSq = d
+        nearest = plot
+      }
+    }
+
+    if (nearest) {
+      const sampled = {
+        ...nearest,
+        lat: parseFloat(latlng.lat.toFixed(5)),
+        lon: parseFloat(latlng.lng.toFixed(5)),
+        isSampled: true,
+        nearestDistanceKm: +(Math.sqrt(minDistanceSq) * 111).toFixed(2)
+      }
+      setSampledPoint(sampled)
+      setActivePlot(sampled)
+    }
+  }
+
+  const handleTalukSelect = (taluk) => {
+    setActiveTaluk(taluk.name)
+    setTargetView({ center: taluk.center, zoom: taluk.zoom })
+  }
 
   return (
     <div className="glass-panel map-view-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      
+      {/* Region & Taluk Quick Jumps */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', paddingBottom: '4px' }}>
+        <span style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          📍 Focus Taluk:
+        </span>
+        {TALUK_PRESETS.map((taluk) => (
+          <button
+            key={taluk.name}
+            className={`btn ${activeTaluk === taluk.name ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontSize: '0.75rem', padding: '4px 10px', borderRadius: '6px' }}
+            onClick={() => handleTalukSelect(taluk)}
+            title={taluk.tag}
+          >
+            {taluk.name}
+          </button>
+        ))}
+      </div>
+
       {/* Map Control Bar */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
+          {/* Base Layer Switcher */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(15,23,34,0.7)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', paddingLeft: '4px', paddingRight: '4px' }}>Layer:</span>
+            <button
+              className={`btn ${baseMapKey === 'dark' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+              onClick={() => setBaseMapKey('dark')}
+            >
+              🌙 Dark
+            </button>
+            <button
+              className={`btn ${baseMapKey === 'satellite' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+              onClick={() => setBaseMapKey('satellite')}
+            >
+              🛰️ Satellite
+            </button>
+            <button
+              className={`btn ${baseMapKey === 'topo' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+              onClick={() => setBaseMapKey('topo')}
+            >
+              🏔️ Topo
+            </button>
+          </div>
+
           {/* Crop Filter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Crop:</span>
             <select
               id="map-filter-crop"
               className="form-select"
-              style={{ width: '160px', padding: '6px 10px', fontSize: '0.85rem' }}
+              style={{ width: '150px', padding: '6px 10px', fontSize: '0.85rem' }}
               value={selectedCrop}
               onChange={(e) => setSelectedCrop(e.target.value)}
             >
@@ -99,7 +235,7 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
             <select
               id="map-filter-suitability"
               className="form-select"
-              style={{ width: '160px', padding: '6px 10px', fontSize: '0.85rem' }}
+              style={{ width: '130px', padding: '6px 10px', fontSize: '0.85rem' }}
               value={selectedSuitability}
               onChange={(e) => setSelectedSuitability(e.target.value)}
             >
@@ -111,11 +247,11 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
           </div>
 
           {/* Color Mode Switcher */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(15,23,34,0.7)', padding: '4px', borderRadius: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(15,23,34,0.7)', padding: '4px', borderRadius: '8px' }}>
             <button
               id="btn-color-by-crop"
               className={`btn ${colorMode === 'crop' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ padding: '5px 12px', fontSize: '0.8rem' }}
+              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
               onClick={() => setColorMode('crop')}
             >
               By Crop
@@ -123,7 +259,7 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
             <button
               id="btn-color-by-suitability"
               className={`btn ${colorMode === 'suitability' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ padding: '5px 12px', fontSize: '0.8rem' }}
+              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
               onClick={() => setColorMode('suitability')}
             >
               By Suitability
@@ -131,11 +267,26 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
             <button
               id="btn-color-by-yield"
               className={`btn ${colorMode === 'yield' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ padding: '5px 12px', fontSize: '0.8rem' }}
+              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
               onClick={() => setColorMode('yield')}
             >
-              By Yield Index
+              By Yield
             </button>
+          </div>
+
+          {/* Dot Size */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            <span>Dot:</span>
+            {[3, 4, 6].map(r => (
+              <button
+                key={r}
+                className={`btn ${markerRadius === r ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '2px 7px', fontSize: '0.7rem', borderRadius: '4px' }}
+                onClick={() => setMarkerRadius(r)}
+              >
+                {r === 3 ? 'S' : r === 4 ? 'M' : 'L'}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -146,7 +297,7 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
       </div>
 
       {/* Map & Plot Details Drawer Layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: activePlot ? '1fr 340px' : '1fr', gap: '16px', minHeight: '600px', height: '68vh' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: activePlot ? '1fr 360px' : '1fr', gap: '16px', minHeight: '620px', height: '70vh', transition: 'all 0.3s ease' }}>
         {/* Leaflet Map */}
         <div style={{ position: 'relative', width: '100%', height: '100%', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
           <MapContainer
@@ -156,31 +307,37 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
             style={{ width: '100%', height: '100%' }}
           >
             <TileLayer
-              attribution='&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Esri, DeLorme, NAVTEQ'
-              url="https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+              attribution={BASE_MAPS[baseMapKey].attribution}
+              url={BASE_MAPS[baseMapKey].url}
             />
 
+            <MapEventsController targetView={targetView} onMapClick={handleMapClick} />
 
+            {/* Regular Plot Markers */}
             {filteredPlots.map((plot, idx) => {
               const lat = parseFloat(plot.lat)
               const lon = parseFloat(plot.lon)
               if (isNaN(lat) || isNaN(lon)) return null
 
               const markerColor = getMarkerColor(plot)
+              const isSelected = activePlot && activePlot.lat === plot.lat && activePlot.lon === plot.lon
 
               return (
                 <CircleMarker
                   key={idx}
                   center={[lat, lon]}
-                  radius={4}
+                  radius={isSelected ? markerRadius + 3 : markerRadius}
                   pathOptions={{
                     fillColor: markerColor,
-                    fillOpacity: 0.85,
-                    color: markerColor,
-                    weight: 1,
+                    fillOpacity: isSelected ? 1.0 : 0.85,
+                    color: isSelected ? '#ffffff' : markerColor,
+                    weight: isSelected ? 2 : 1,
                   }}
                   eventHandlers={{
-                    click: () => setActivePlot(plot)
+                    click: () => {
+                      setSampledPoint(null)
+                      setActivePlot(plot)
+                    }
                   }}
                 >
                   <Popup>
@@ -193,17 +350,73 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
                       <div><strong>Elevation:</strong> {plot.elevation}m (Slope: {parseFloat(plot.slope || 0).toFixed(1)}°)</div>
                       <button
                         className="btn btn-primary"
-                        style={{ marginTop: '8px', padding: '4px 10px', fontSize: '0.75rem', width: '100%' }}
-                        onClick={() => setActivePlot(plot)}
+                        style={{ marginTop: '8px', padding: '6px 10px', fontSize: '0.8rem', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onSelectPlotForPredict(plot)
+                        }}
                       >
-                        Inspect Details
+                        🧪 Open in Live Recommender ↗
                       </button>
                     </div>
                   </Popup>
                 </CircleMarker>
               )
             })}
+
+            {/* Custom Sampled Point from Click Anywhere */}
+            {sampledPoint && (
+              <CircleMarker
+                center={[sampledPoint.lat, sampledPoint.lon]}
+                radius={9}
+                pathOptions={{
+                  fillColor: '#38bdf8',
+                  fillOpacity: 0.9,
+                  color: '#ffffff',
+                  weight: 3
+                }}
+              >
+                <Popup autoPan={false}>
+                  <div style={{ fontSize: '0.85rem' }}>
+                    <div style={{ fontWeight: '700', color: '#38bdf8' }}>📍 Custom Sampled Location</div>
+                    <div>{sampledPoint.lat}°N, {sampledPoint.lon}°E</div>
+                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Nearest parcel: {sampledPoint.nearestDistanceKm} km away</div>
+                    <button
+                      className="btn btn-primary"
+                      style={{ marginTop: '8px', padding: '6px 10px', fontSize: '0.8rem', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onSelectPlotForPredict(sampledPoint)
+                      }}
+                    >
+                      🧪 Open in Live Recommender ↗
+                    </button>
+                  </div>
+                </Popup>
+              </CircleMarker>
+            )}
           </MapContainer>
+
+          {/* Floating Instructions Banner */}
+          <div style={{
+            position: 'absolute',
+            top: '14px',
+            left: '14px',
+            zIndex: 1000,
+            background: 'rgba(9, 14, 21, 0.85)',
+            backdropFilter: 'blur(8px)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '8px',
+            padding: '6px 12px',
+            fontSize: '0.75rem',
+            color: 'var(--text-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            <span>💡 Tip:</span>
+            <span>Click any parcel or <em>click anywhere on the map</em> to sample coordinates!</span>
+          </div>
 
           {/* Floating Legend */}
           <div style={{
@@ -216,7 +429,7 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
             border: '1px solid var(--border-subtle)',
             borderRadius: '10px',
             padding: '10px 14px',
-            maxWidth: '260px',
+            maxWidth: '280px',
             fontSize: '0.75rem'
           }}>
             <div style={{ fontWeight: '600', marginBottom: '6px', color: '#ffffff' }}>
@@ -254,29 +467,44 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
 
         {/* Selected Plot Inspector Drawer */}
         {activePlot && (
-          <div className="glass-panel" style={{ padding: '18px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px', height: '100%' }}>
+          <div className="glass-panel drawer-slide" style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px', height: '100%', borderLeft: '1px solid rgba(16, 185, 129, 0.3)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '600' }}>
-                Parcel Inspector
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.05em' }}>
+                  {activePlot.isSampled ? '📍 Sampled Location' : 'Parcel Inspector'}
+                </span>
+                {activePlot.isSampled && (
+                  <span style={{ fontSize: '0.7rem', padding: '2px 6px', background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', borderRadius: '4px' }}>
+                    Map Pin
+                  </span>
+                )}
               </div>
               <button
                 className="btn btn-secondary"
-                style={{ padding: '2px 8px', fontSize: '0.8rem', borderRadius: '4px' }}
-                onClick={() => setActivePlot(null)}
+                style={{ padding: '3px 8px', fontSize: '0.8rem', borderRadius: '4px' }}
+                onClick={() => {
+                  setActivePlot(null)
+                  setSampledPoint(null)
+                }}
               >
                 ✕
               </button>
             </div>
 
             <div style={{ padding: '12px', background: 'rgba(15,23,34,0.6)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: '700', color: getMarkerColor(activePlot) }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: '700', color: getMarkerColor(activePlot) }}>
                 {activePlot.recommended_crop}
               </div>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '2px' }}>
                 Coordinates: {parseFloat(activePlot.lat).toFixed(4)}°N, {parseFloat(activePlot.lon).toFixed(4)}°E
               </div>
+              {activePlot.isSampled && activePlot.nearestDistanceKm && (
+                <div style={{ fontSize: '0.75rem', color: '#38bdf8', marginTop: '4px' }}>
+                  Derived from nearest grid cell ({activePlot.nearestDistanceKm} km away)
+                </div>
+              )}
               {activePlot.not_recommended_reason && (
-                <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#fb7185', background: 'rgba(244,63,94,0.1)', padding: '4px 8px', borderRadius: '4px' }}>
+                <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#fb7185', background: 'rgba(244,63,94,0.1)', padding: '6px 8px', borderRadius: '4px', border: '1px solid rgba(244,63,94,0.2)' }}>
                   ⚠️ {activePlot.not_recommended_reason}
                 </div>
               )}
@@ -301,7 +529,6 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
                 </div>
               </div>
             )}
-
 
             {/* Suitability Meter */}
             <div>
@@ -374,7 +601,7 @@ export default function MapView({ plots, onSelectPlotForPredict }) {
             <button
               id="btn-inspect-load-predict"
               className="btn btn-primary"
-              style={{ marginTop: 'auto', width: '100%' }}
+              style={{ marginTop: 'auto', width: '100%', padding: '10px' }}
               onClick={() => onSelectPlotForPredict(activePlot)}
             >
               🧪 Load into Live Recommender
